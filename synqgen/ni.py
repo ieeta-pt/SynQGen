@@ -5,6 +5,27 @@ import torch
 from tqdm import tqdm
 from dataclasses import dataclass
 from typing import List
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.utils import PaddingStrategy
+from typing import Any, Callable, Dict, List, NewType, Optional, Tuple, Union
+
+
+@dataclass
+class ConvertToTensor:
+
+    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
+        
+        samples = {"input_ids": [], "attention_mask": [], "id":[]}
+        
+        for feature in features:
+            samples["id"].append(feature["id"])
+            samples["input_ids"].append(feature["input_ids"])
+            samples["attention_mask"].append(feature["attention_mask"])
+        
+        samples["input_ids"] = torch.as_tensor(samples["input_ids"])
+        samples["attention_mask"] = torch.as_tensor(samples["attention_mask"])
+        
+        return samples
 
 @dataclass
 class LMInput:
@@ -84,27 +105,32 @@ class NIEstimator():
         
         dl = torch.utils.data.DataLoader(dataset,
                                          batch_size=1, 
-                                         collate_fn=DataCollatorWithPadding(self.tokenizer, return_tensors="pt"),
+                                         collate_fn=ConvertToTensor(),
                                          pin_memory=True)
         
         with torch.no_grad():
             for b_sample in tqdm(dl):
                 b_id = b_sample.pop("id")
                 
+                input_ids = b_sample["input_ids"].to("cuda")
+                
                 # dynamic context
                 if context_percentage>0:
-                    context_tokens = int(b_sample.input_ids.shape[-1]*context_percentage)
+                    context_tokens = int(input_ids.shape[-1]*context_percentage)
                 
-                logits = self.model(**b_sample.to("cuda")).logits[:,context_tokens:-1,:] # skip last
+                
+                
+                logits = self.model(input_ids=input_ids,
+                                    attention_mask=b_sample["attention_mask"].to("cuda")).logits[:,context_tokens:-1,:] # skip last
                 log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
                     
-                target_ids = b_sample.input_ids[:,context_tokens+1:, None].long() # skip first + context  
+                target_ids = input_ids[:,context_tokens+1:, None].long() # skip first + context  
                 log_target_probs = torch.gather(log_probs, -1, target_ids).squeeze(-1).sum(axis=-1)
                 
                 yield {
-                    "id": b_id[0].item(),
+                    "id": b_id[0],
                     "information" : -log_target_probs[0].cpu().item(),
-                    "seq_len": b_sample.input_ids.shape[-1] - context_tokens+1,
+                    "seq_len": b_sample["input_ids"].shape[-1] - context_tokens+1,
                 }
 
 class HFNIEstimator(NIEstimator):
