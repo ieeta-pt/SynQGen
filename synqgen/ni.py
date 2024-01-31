@@ -86,6 +86,7 @@ class NIEstimator():
                                    generator, 
                                    context_percentage=0,
                                    context_tokens=0,
+                                   max_samples=None,
                                    progress_bar=True):
         
         if context_percentage>0 and context_tokens>0:
@@ -102,6 +103,9 @@ class NIEstimator():
         
         dataset = dataset.map(sliding_window_f, batched=True, batch_size=8, remove_columns=["text"])
 
+        if max_samples is not None:
+            dataset = dataset[:max_samples]
+        
         # seems to be more stable if its one at a time
         print("New size of dataset", len(dataset))
         dl = torch.utils.data.DataLoader(dataset,
