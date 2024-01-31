@@ -103,7 +103,7 @@ class NIEstimator():
         dataset = dataset.map(sliding_window_f, batched=True, batch_size=8, remove_columns=["text"])
 
         # seems to be more stable if its one at a time
-        
+        print("New size of dataset", len(dataset))
         dl = torch.utils.data.DataLoader(dataset,
                                          batch_size=1, 
                                          collate_fn=ConvertToTensor(),
