@@ -85,7 +85,8 @@ class NIEstimator():
     def information_from_generator(self, 
                                    generator, 
                                    context_percentage=0,
-                                   context_tokens=0):
+                                   context_tokens=0,
+                                   progress_bar=True):
         
         if context_percentage>0 and context_tokens>0:
             print("WARNING: Note that context_percentage and context_tokens are both defined we will use the value of context_percentage.")
@@ -108,8 +109,11 @@ class NIEstimator():
                                          collate_fn=ConvertToTensor(),
                                          pin_memory=True)
         
+        if progress_bar:
+            dl = tqdm(dl)
+        
         with torch.no_grad():
-            for b_sample in tqdm(dl):
+            for b_sample in dl:
                 b_id = b_sample.pop("id")
                 
                 input_ids = b_sample["input_ids"].to("cuda")
@@ -117,8 +121,6 @@ class NIEstimator():
                 # dynamic context
                 if context_percentage>0:
                     context_tokens = int(input_ids.shape[-1]*context_percentage)
-                
-                
                 
                 logits = self.model(input_ids=input_ids,
                                     attention_mask=b_sample["attention_mask"].to("cuda")).logits[:,context_tokens:-1,:] # skip last
