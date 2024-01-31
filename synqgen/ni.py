@@ -45,7 +45,7 @@ class NIEstimator():
                 log_target_probs = torch.gather(log_probs, -1, target_ids).squeeze(-1).sum(axis=-1)
                 
                 yield {
-                    "id": b_id[0],
+                    "id": b_id[0].item(),
                     "information" : -log_target_probs[0].cpu().item(),
                     "seq_len": b_sample.input_ids.shape[-1] - context_tokens+1,
                 }
