@@ -3,12 +3,63 @@ from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
 import torch
 from tqdm import tqdm
+from dataclasses import dataclass
+from typing import List
 
+@dataclass
+class LMInput:
+    input_ids: List[int]
+    attention_mask: List[int]
+    
+    def __len__(self):
+        return len(self.input_ids)
+
+class MovingWindow:
+    "https://stackoverflow.com/questions/64118654/best-way-to-implement-moving-window-in-python-for-loop"
+    def __init__(self, tokens, window_size, step):
+        self.current = -step
+        self.last = len(tokens.input_ids) - window_size + 1
+        self.remaining = (len(tokens.input_ids) - window_size) % step
+        self.tokens = tokens
+        self.window_size = window_size
+        self.step = step
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.current += self.step
+        if self.current < self.last:
+            return LMInput(input_ids=self.tokens.input_ids[self.current : self.current + self.window_size],
+                           attention_mask=self.tokens.attention_mask[self.current : self.current + self.window_size])
+        elif self.remaining:
+            self.remaining = 0
+            return LMInput(input_ids=self.tokens.input_ids[-self.window_size:],
+                           attention_mask=self.tokens.attention_mask[-self.window_size:])
+        else:
+            raise StopIteration
+        
+        
+def sliding_window(tokenizer, window_size, step_size):
+    def func(sample):
+        samples = {"input_ids": [], "attention_mask": [], "id":[]}
+
+        for i in range(len(sample["id"])):
+            for j,s_sample in enumerate(MovingWindow(tokenizer(sample["text"][i]), window_size, step_size)):
+                samples["input_ids"].append(s_sample.input_ids)
+                samples["attention_mask"].append(s_sample.attention_mask)
+                _id = sample["id"][i]
+                samples["id"].append(f"{_id}_{j}")
+        
+        return samples
+    return func
+        
 class NIEstimator():
     
-    def __init__(self, model, tokenizer) -> None:
+    def __init__(self, model, tokenizer, cache_dir=None) -> None:
         self.model = model.to("cuda")
         self.tokenizer = tokenizer
+        self.cache_dir = cache_dir
     
     def information_from_generator(self, 
                                    generator, 
@@ -18,10 +69,16 @@ class NIEstimator():
         if context_percentage>0 and context_tokens>0:
             print("WARNING: Note that context_percentage and context_tokens are both defined we will use the value of context_percentage.")
         
-        dataset = Dataset.from_generator(generator)
+        dataset = Dataset.from_generator(generator, cache_dir=self.cache_dir)
         #This needs to change to a sliding window
-        dataset = dataset.map(lambda sample: self.tokenizer(sample["text"], truncation=True),
-                              remove_columns=["text"])
+        _window_size = min(self.tokenizer.model_max_length, 4096)
+        _step_size = _window_size//2
+        
+        sliding_window_f = sliding_window(tokenizer=self.tokenizer,
+                                          window_size=_window_size,
+                                          step_size=_step_size)
+        
+        dataset = dataset.map(sliding_window_f, batched=True, batch_size=8, remove_columns=["text"])
 
         # seems to be more stable if its one at a time
         
@@ -64,4 +121,4 @@ class HFNIEstimator(NIEstimator):
         if tokenizer.eos_token is None and tokenizer.pad_token is None:
             raise RuntimeError("No avaialble padding token")
 
-        super().__init__(model=model, tokenizer=tokenizer)
+        super().__init__(model=model, tokenizer=tokenizer, cache_dir=cache_dir)
