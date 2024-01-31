@@ -19,6 +19,7 @@ class NIEstimator():
             print("WARNING: Note that context_percentage and context_tokens are both defined we will use the value of context_percentage.")
         
         dataset = Dataset.from_generator(generator)
+        #This needs to change to a sliding window
         dataset = dataset.map(lambda sample: self.tokenizer(sample["text"], truncation=True),
                               remove_columns=["text"])
 
