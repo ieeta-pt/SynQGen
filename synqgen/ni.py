@@ -19,7 +19,7 @@ class NIEstimator():
             print("WARNING: Note that context_percentage and context_tokens are both defined we will use the value of context_percentage.")
         
         dataset = Dataset.from_generator(generator)
-        dataset = dataset.map(lambda sample: self.tokenizer(sample["text"]),
+        dataset = dataset.map(lambda sample: self.tokenizer(sample["text"], truncation=True),
                               remove_columns=["text"])
 
         # seems to be more stable if its one at a time
