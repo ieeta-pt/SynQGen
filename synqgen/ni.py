@@ -10,7 +10,14 @@ class NIEstimator():
         self.model = model.to("cuda")
         self.tokenizer = tokenizer
     
-    def information_from_generator(self, generator, context_tokens=0):
+    def information_from_generator(self, 
+                                   generator, 
+                                   context_percentage=0,
+                                   context_tokens=0):
+        
+        if context_percentage>0 and context_tokens>0:
+            print("WARNING: Note that context_percentage and context_tokens are both defined we will use the value of context_percentage.")
+        
         dataset = Dataset.from_generator(generator)
         dataset = dataset.map(lambda sample: self.tokenizer(sample["text"]),
                               remove_columns=["text"])
@@ -25,6 +32,11 @@ class NIEstimator():
         with torch.no_grad():
             for b_sample in tqdm(dl):
                 b_id = b_sample.pop("id")
+                
+                # dynamic context
+                if context_percentage>0:
+                    context_tokens = int(b_sample.input_ids.shape[-1]*context_percentage)
+                
                 logits = self.model(**b_sample.to("cuda")).logits[:,context_tokens:-1,:] # skip last
                 log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
                     
