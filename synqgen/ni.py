@@ -50,9 +50,12 @@ class NIEstimator():
                 }
 
 class HFNIEstimator(NIEstimator):
-    def __init__(self, checkpoint_name):
-        model = AutoModelForCausalLM.from_pretrained(checkpoint_name)
+    def __init__(self, checkpoint_name, cache_dir=None, model_kwargs={}):
+        model = AutoModelForCausalLM.from_pretrained(checkpoint_name, 
+                                                     cache_dir = cache_dir,
+                                                     **model_kwargs)
         tokenizer = AutoTokenizer.from_pretrained(checkpoint_name, 
+                                                  cache_dir = cache_dir,
                                                   padding_side="left")
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
