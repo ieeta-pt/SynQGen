@@ -15,13 +15,12 @@ class ConvertToTensor:
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         
-        samples = {"input_ids": [], "attention_mask": [], "id":[]}
+        samples = {k:[] for k in features[0].keys()}
         
         for feature in features:
-            samples["id"].append(feature["id"])
-            samples["input_ids"].append(feature["input_ids"])
-            samples["attention_mask"].append(feature["attention_mask"])
-        
+            for k in samples.keys():
+                samples[k].append(feature[k])
+            
         samples["input_ids"] = torch.as_tensor(samples["input_ids"])
         samples["attention_mask"] = torch.as_tensor(samples["attention_mask"])
         
@@ -64,13 +63,18 @@ class MovingWindow:
 def sliding_window(tokenizer, window_size, step_size):
     def func(sample):
         samples = {"input_ids": [], "attention_mask": [], "id":[]}
-
+        reminder_keys = set(sample.keys())-(set(samples.keys())|set(["text"]))
+        #print("reminder_keys", reminder_keys)
+        samples |= {k:[] for k in reminder_keys}
+        
         for i in range(len(sample["id"])):
-            for j,s_sample in enumerate(MovingWindow(tokenizer(sample["text"][i]), window_size, step_size)):
+            for j, s_sample in enumerate(MovingWindow(tokenizer(sample["text"][i]), window_size, step_size)):
                 samples["input_ids"].append(s_sample.input_ids)
                 samples["attention_mask"].append(s_sample.attention_mask)
                 _id = sample["id"][i]
                 samples["id"].append(f"{_id}_{j}")
+                for k in reminder_keys:
+                    samples[k].append(sample[k][i])
         
         return samples
     return func
@@ -87,6 +91,7 @@ class NIEstimator():
                                    context_percentage=0,
                                    context_tokens=0,
                                    max_samples=None,
+                                   max_documents=None,
                                    progress_bar=True):
         
         if context_percentage>0 and context_tokens>0:
@@ -101,11 +106,14 @@ class NIEstimator():
                                           window_size=_window_size,
                                           step_size=_step_size)
         
+        if max_documents is not None and max_documents<len(dataset):
+            dataset = dataset.select(range(max_documents))
+        
         dataset = dataset.map(sliding_window_f, batched=True, batch_size=8, remove_columns=["text"])
 
-        if max_samples is not None:
+        if max_samples is not None and max_samples<len(dataset):
             dataset = dataset.select(range(max_samples))
-        
+        #print(dataset[0].keys())
         # seems to be more stable if its one at a time
         print("New size of dataset", len(dataset))
         dl = torch.utils.data.DataLoader(dataset,
@@ -118,25 +126,24 @@ class NIEstimator():
         
         with torch.no_grad():
             for b_sample in dl:
-                b_id = b_sample.pop("id")
                 
-                input_ids = b_sample["input_ids"].to("cuda")
-                
+                input_ids = b_sample.pop("input_ids").to("cuda")
+                attention_mask = b_sample.pop("attention_mask").to("cuda")
                 # dynamic context
                 if context_percentage>0:
                     context_tokens = int(input_ids.shape[-1]*context_percentage)
                 
                 logits = self.model(input_ids=input_ids,
-                                    attention_mask=b_sample["attention_mask"].to("cuda")).logits[:,context_tokens:-1,:] # skip last
+                                    attention_mask=attention_mask).logits[:,context_tokens:-1,:] # skip last
                 log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
                     
                 target_ids = input_ids[:,context_tokens+1:, None].long() # skip first + context  
                 log_target_probs = torch.gather(log_probs, -1, target_ids).squeeze(-1).sum(axis=-1)
                 
                 yield {
-                    "id": b_id[0],
+                    **{k:v[0] for k,v in b_sample.items()},
                     "information" : -log_target_probs[0].cpu().item(),
-                    "seq_len": b_sample["input_ids"].shape[-1] - context_tokens+1,
+                    "seq_len": input_ids.shape[-1] - context_tokens+1,
                 }
 
 class HFNIEstimator(NIEstimator):
