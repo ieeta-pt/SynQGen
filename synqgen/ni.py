@@ -78,7 +78,7 @@ def sliding_window(tokenizer, window_size, step_size):
 class NIEstimator():
     
     def __init__(self, model, tokenizer, cache_dir=None) -> None:
-        self.model = model.to("cuda")
+        self.model = model#.to("cuda")
         self.tokenizer = tokenizer
         self.cache_dir = cache_dir
     
@@ -104,7 +104,7 @@ class NIEstimator():
         dataset = dataset.map(sliding_window_f, batched=True, batch_size=8, remove_columns=["text"])
 
         if max_samples is not None:
-            dataset = dataset[:max_samples]
+            dataset = dataset.select(range(max_samples))
         
         # seems to be more stable if its one at a time
         print("New size of dataset", len(dataset))
